@@ -1,0 +1,37 @@
+services:
+  localstack:
+    container_name: localstack_main
+    image: localstack/localstack:3.8
+    ports:
+      - "127.0.0.1:4566:4566"            # LocalStack Gateway
+      - "127.0.0.1:4510-4559:4510-4559"  # Puertos dinámicos de servicios
+    environment:
+      - SERVICES=s3,sqs,lambda,cloudwatch,logs,dynamodb,iam,sts,apigateway,cloudformation
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LOCALSTACK_AUTH_TOKEN=""         # Evita la advertencia de token de autenticación
+      - DISABLE_EVENTS=1                 # Desactiva telemetría hacia LocalStack
+    volumes:
+      - "./localstack_data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - app-network
+
+  postgres:
+    container_name: postgres_tickets
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=app_user
+      - POSTGRES_PASSWORD=app_password
+      - POSTGRES_DB=tickets_db
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

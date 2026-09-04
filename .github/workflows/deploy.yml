@@ -1,0 +1,69 @@
+name: CI/CD Pipeline - Tickets App
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-lint:
+    name: 1. Pruebas Unitarias y Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias Backend
+        run: |
+          cd backend
+          npm ci
+
+      - name: Instalar dependencias Frontend
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Ejecutar Pruebas Backend
+        run: |
+          cd backend
+          npm test --if-present
+
+  terraform-deploy:
+    name: 2. Validar y Desplegar Infraestructura (IaC)
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      - name: Levantar LocalStack en el Runner
+        run: |
+          docker run -d -p 4566:4566 -p 4510-4559:4510-4559 localstack/localstack
+
+      - name: Terraform Init & Validate
+        run: |
+          cd terraform
+          terraform init
+          terraform validate
+
+      - name: Terraform Apply (LocalStack CI)
+        env:
+          AWS_ACCESS_KEY_ID: mock_access_key
+          AWS_SECRET_ACCESS_KEY: mock_secret_key
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          cd terraform
+          terraform apply -auto-approve

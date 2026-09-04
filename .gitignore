@@ -1,0 +1,42 @@
+# Dependencias de Node.js (Frontend, Backend y Lambda)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Compilados de producción y caché
+dist/
+build/
+.vite/
+.cache/
+
+# Terraform (Estado local, variables y caché)
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfvars.json
+.terraform.lock.hcl
+
+# Empaquetados ZIP creados para la Lambda
+*.zip
+
+# Entorno local y variables secretas
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs del sistema y de LocalStack
+*.log
+localstack/
+
+# Archivos del sistema operativo e IDEs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Datos persistentes de la base de datos PostgreSQL
+postgres_data/
