@@ -51,12 +51,17 @@ jobs:
 
       - name: Levantar LocalStack en el Runner
         run: |
-          # 1. Iniciar el contenedor de LocalStack
-          docker run -d -p 4566:4566 -p 4510-4559:4510-4559 --name localstack localstack/localstack
+          # 1. Iniciar LocalStack con variables recomendadas para CI
+          docker run -d \
+            -p 4566:4566 \
+            -p 4510-4559:4510-4559 \
+            -e DOCKER_HOST=unix:///var/run/docker.sock \
+            --name localstack \
+            localstack/localstack
 
-          # 2. Esperar a que el servicio responda con un HTTP 200
-          echo "Esperando a que LocalStack esté listo para recibir tráfico..."
-          until [ $(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4566/_localstack/health) -eq 200 ]; do
+          # 2. Esperar a que el puerto responda o al endpoint /_localstack/init/ready
+          echo "Esperando a que LocalStack esté listo..."
+          until [ $(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4566/_localstack/init/ready) -eq 200 ]; do
             echo "LocalStack iniciando... reintentando en 3 segundos"
             sleep 3
           done
