@@ -2,23 +2,25 @@ name: CI/CD Pipeline - Tickets App
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
+
   test-and-lint:
     name: 1. Pruebas Unitarias y Linting
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Código
         uses: actions/checkout@v4
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Instalar dependencias Backend
         run: |
@@ -35,34 +37,122 @@ jobs:
           cd backend
           npm test --if-present
 
+
   terraform-deploy:
     name: 2. Validar y Desplegar Infraestructura (IaC)
     needs: test-and-lint
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Código
         uses: actions/checkout@v4
+
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0
+          terraform_version: "1.7.0"
 
-      - name: Levantar LocalStack en el Runner
-        run: |
-          # 1. Iniciar el contenedor de LocalStack
-          docker run -d -p 4566:4566 -p 4510-4559:4510-4559 --name localstack localstack/localstack
 
-      - name: Terraform Init & Validate
+      # ==========================================
+      # LOCALSTACK
+      # ==========================================
+
+      - name: Levantar LocalStack
         run: |
-          terraform init -backend-config="noop"
+          docker run -d \
+            --name localstack \
+            -p 4566:4566 \
+            -p 4510-4559:4510-4559 \
+            localstack/localstack
+
+
+      - name: Esperar a LocalStack
+        run: |
+          echo "Esperando a que LocalStack esté listo..."
+
+          for i in {1..30}; do
+
+            if curl -s \
+              http://127.0.0.1:4566/_localstack/health \
+              > /dev/null; then
+
+              echo "LocalStack está listo."
+
+              curl -s \
+                http://127.0.0.1:4566/_localstack/health
+
+              exit 0
+            fi
+
+            echo "Intento $i/30..."
+            sleep 2
+
+          done
+
+          echo "ERROR: LocalStack no inició correctamente."
+
+          docker ps -a
+          docker logs localstack
+
+          exit 1
+
+
+      # ==========================================
+      # TERRAFORM
+      # ==========================================
+
+      - name: Terraform Init
+        run: |
+          terraform init
+
+
+      - name: Terraform Validate
+        run: |
           terraform validate
-          
-      - name: Terraform Apply (LocalStack CI)
+
+
+      - name: Terraform Plan
         env:
-          AWS_ACCESS_KEY_ID: mock_access_key
-          AWS_SECRET_ACCESS_KEY: mock_secret_key
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          terraform plan
+
+
+      - name: Terraform Apply
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
           AWS_DEFAULT_REGION: us-east-1
         run: |
           terraform apply -auto-approve
+
+
+      # ==========================================
+      # DEBUG
+      # ==========================================
+
+      - name: Logs de LocalStack si falla
+        if: failure()
+        run: |
+          echo "================================"
+          echo "DOCKER CONTAINERS"
+          echo "================================"
+
+          docker ps -a
+
+          echo "================================"
+          echo "LOCALSTACK LOGS"
+          echo "================================"
+
+          docker logs localstack
+
+          echo "================================"
+          echo "LOCALSTACK HEALTH"
+          echo "================================"
+
+          curl -v \
+            http://127.0.0.1:4566/_localstack/health || true
