@@ -58,12 +58,7 @@ jobs:
             --name localstack \
             localstack/localstack
 
-          echo "Esperando a que LocalStack acepte conexiones..."
-          # Verifica cualquier respuesta HTTP del puerto 4566 (incluso 404/405 indica que el servidor ya está escuchando)
-          until curl -s http://127.0.0.1:4566/ > /dev/null; do
-            echo "Esperando a LocalStack..."
-            sleep 2
-          done
+          curl -s http://127.0.0.1:4566/
 
           echo "✔ LocalStack se inició y está listo."
 
