@@ -54,15 +54,6 @@ jobs:
           # 1. Iniciar el contenedor de LocalStack
           docker run -d -p 4566:4566 -p 4510-4559:4510-4559 --name localstack localstack/localstack
 
-          # 2. Esperar a que el servicio responda con un HTTP 200
-          echo "Esperando a que LocalStack esté listo para recibir tráfico..."
-          until [ $(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4566/_localstack/health) -eq 200 ]; do
-            echo "LocalStack iniciando... reintentando en 3 segundos"
-            sleep 3
-          done
-
-          echo "✔ LocalStack se inició y está listo."
-
       - name: Terraform Init & Validate
         run: |
           terraform init -backend-config="noop"
