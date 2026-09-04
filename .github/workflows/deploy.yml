@@ -63,8 +63,11 @@ jobs:
         run: |
           docker run -d \
             --name localstack \
+            -v /var/run/docker.sock:/var/run/docker.sock \
             -p 4566:4566 \
             -p 4510-4559:4510-4559 \
+            -e SERVICES=s3,sqs,lambda,iam,logs,cloudwatch \
+            -e AWS_DEFAULT_REGION=us-east-1 \
             localstack/localstack:3.8
 
 
