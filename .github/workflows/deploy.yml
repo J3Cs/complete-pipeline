@@ -55,7 +55,7 @@ jobs:
 
       - name: Terraform Init & Validate
         run: |
-          terraform init
+          terraform init -backend-config="noop"
           terraform validate
 
       - name: Terraform Apply (LocalStack CI)
