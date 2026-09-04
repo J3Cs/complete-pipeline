@@ -57,6 +57,15 @@ jobs:
         run: |
           terraform init -backend-config="noop"
           terraform validate
+          
+      - name: Start LocalStack
+        run: |
+          docker run -d -p 4566:4566 -p 4510-4559:4510-4559 --name localstack localstack/localstack
+          echo "Esperando a que LocalStack esté listo..."
+          until curl -s http://127.0.0.1:4566/_localstack/health | grep '"s3": "running"\|"s3": "available"'; do
+            sleep 5
+          done
+          echo "LocalStack listo!"
 
       - name: Terraform Apply (LocalStack CI)
         env:
