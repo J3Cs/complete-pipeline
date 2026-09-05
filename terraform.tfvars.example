@@ -1,0 +1,5 @@
+# Ejemplo de configuración para despliegue en AWS Real (Staging o Prod)
+environment    = "prod"
+aws_region     = "us-east-1"
+use_localstack = false
+bucket_prefix  = "tickets-adjuntos-empresa"

@@ -1,4 +1,6 @@
 terraform {
+  required_version = ">= 1.5.0"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -13,30 +15,33 @@ terraform {
 }
 
 # ============================================================
-# PROVIDER AWS - LOCALSTACK
+# PROVIDER AWS - DINÁMICO (LOCALSTACK vs AWS REAL)
 # ============================================================
 
 provider "aws" {
-  region = "us-east-1"
+  region = var.aws_region
 
-  # LocalStack no requiere credenciales reales
-  access_key = "test"
-  secret_key = "test"
+  # Credenciales de prueba si estamos en LocalStack
+  access_key = var.use_localstack ? "test" : null
+  secret_key = var.use_localstack ? "test" : null
 
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
+  skip_credentials_validation = var.use_localstack
+  skip_metadata_api_check     = var.use_localstack
+  skip_requesting_account_id  = var.use_localstack
 
-  # Necesario para trabajar correctamente con S3 en LocalStack
-  s3_use_path_style = true
+  s3_use_path_style = var.use_localstack
 
-  endpoints {
-    s3         = "http://127.0.0.1:4566"
-    sqs        = "http://127.0.0.1:4566"
-    lambda     = "http://127.0.0.1:4566"
-    iam        = "http://127.0.0.1:4566"
-    cloudwatch = "http://127.0.0.1:4566"
-    logs       = "http://127.0.0.1:4566"
+  # Los endpoints solo se sobreescriben en entorno LocalStack
+  dynamic "endpoints" {
+    for_each = var.use_localstack ? [1] : []
+    content {
+      s3         = var.localstack_endpoint
+      sqs        = var.localstack_endpoint
+      lambda     = var.localstack_endpoint
+      iam        = var.localstack_endpoint
+      cloudwatch = var.localstack_endpoint
+      logs       = var.localstack_endpoint
+    }
   }
 }
 
@@ -46,8 +51,8 @@ provider "aws" {
 # ============================================================
 
 resource "aws_s3_bucket" "bucket_adjuntos" {
-  bucket        = "tickets-adjuntos-local"
-  force_destroy = true
+  bucket        = "${var.bucket_prefix}-${var.environment}"
+  force_destroy = var.use_localstack ? true : false
 }
 
 
@@ -56,14 +61,13 @@ resource "aws_s3_bucket" "bucket_adjuntos" {
 # ============================================================
 
 resource "aws_sqs_queue" "cola_procesamiento" {
-  name                       = "cola-procesamiento-tickets"
+  name                       = "cola-procesamiento-tickets-${var.environment}"
   visibility_timeout_seconds = 30
 }
 
 
 # ============================================================
 # SQS - POLÍTICA PARA S3
-# Permite que S3 envíe mensajes a la cola.
 # ============================================================
 
 resource "aws_sqs_queue_policy" "sqs_policy" {
@@ -71,19 +75,12 @@ resource "aws_sqs_queue_policy" "sqs_policy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-
     Statement = [
       {
-        Effect = "Allow"
-
-        Principal = {
-          Service = "s3.amazonaws.com"
-        }
-
-        Action = "sqs:SendMessage"
-
-        Resource = aws_sqs_queue.cola_procesamiento.arn
-
+        Effect    = "Allow"
+        Principal = { Service = "s3.amazonaws.com" }
+        Action    = "sqs:SendMessage"
+        Resource  = aws_sqs_queue.cola_procesamiento.arn
         Condition = {
           ArnEquals = {
             "aws:SourceArn" = aws_s3_bucket.bucket_adjuntos.arn
@@ -96,8 +93,7 @@ resource "aws_sqs_queue_policy" "sqs_policy" {
 
 
 # ============================================================
-# S3 -> SQS
-# Notificación cuando se crea un objeto en S3.
+# S3 -> SQS NOTIFICACIÓN
 # ============================================================
 
 resource "aws_s3_bucket_notification" "notificacion_s3" {
@@ -105,10 +101,7 @@ resource "aws_s3_bucket_notification" "notificacion_s3" {
 
   queue {
     queue_arn = aws_sqs_queue.cola_procesamiento.arn
-
-    events = [
-      "s3:ObjectCreated:*"
-    ]
+    events    = ["s3:ObjectCreated:*"]
   }
 
   depends_on = [
@@ -122,62 +115,45 @@ resource "aws_s3_bucket_notification" "notificacion_s3" {
 # ============================================================
 
 data "archive_file" "lambda_zip" {
-  type = "zip"
-
-  source_dir = "${path.module}/lambda"
-
+  type        = "zip"
+  source_dir  = "${path.module}/lambda"
   output_path = "${path.module}/lambda.zip"
 }
 
 
 # ============================================================
-# IAM ROLE PARA LAMBDA
+# IAM ROLE Y POLICIES PARA LAMBDA
 # ============================================================
 
 resource "aws_iam_role" "role_lambda" {
-  name = "role_procesador_tickets_lambda"
+  name = "role_procesador_tickets_lambda_${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-
     Statement = [
       {
-        Effect = "Allow"
-
-        Action = "sts:AssumeRole"
-
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
+        Effect    = "Allow"
+        Action    = "sts:AssumeRole"
+        Principal = { Service = "lambda.amazonaws.com" }
       }
     ]
   })
 }
 
-
-# ============================================================
-# IAM POLICY PARA LAMBDA
-# Permisos básicos de CloudWatch Logs.
-# ============================================================
-
 resource "aws_iam_role_policy" "lambda_logs" {
-  name = "lambda-cloudwatch-logs"
-
+  name = "lambda-cloudwatch-logs-${var.environment}"
   role = aws_iam_role.role_lambda.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-
     Statement = [
       {
         Effect = "Allow"
-
         Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-
         Resource = "*"
       }
     ]
@@ -186,20 +162,15 @@ resource "aws_iam_role_policy" "lambda_logs" {
 
 
 # ============================================================
-# LAMBDA
+# LAMBDA FUNCTION
 # ============================================================
 
 resource "aws_lambda_function" "procesador_adjuntos" {
-  filename = data.archive_file.lambda_zip.output_path
-
-  function_name = "procesador_adjuntos_tickets"
-
-  role = aws_iam_role.role_lambda.arn
-
-  handler = "index.handler"
-
-  runtime = "nodejs20.x"
-
+  filename         = data.archive_file.lambda_zip.output_path
+  function_name    = "procesador_adjuntos_tickets_${var.environment}"
+  role             = aws_iam_role.role_lambda.arn
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   depends_on = [
@@ -209,18 +180,14 @@ resource "aws_lambda_function" "procesador_adjuntos" {
 
 
 # ============================================================
-# LAMBDA <- SQS
-# Event Source Mapping
+# LAMBDA <- SQS TRIGGER
 # ============================================================
 
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
   event_source_arn = aws_sqs_queue.cola_procesamiento.arn
-
-  function_name = aws_lambda_function.procesador_adjuntos.arn
-
-  batch_size = 1
-
-  enabled = true
+  function_name    = aws_lambda_function.procesador_adjuntos.arn
+  batch_size       = 1
+  enabled          = true
 
   depends_on = [
     aws_lambda_function.procesador_adjuntos,
@@ -230,38 +197,27 @@ resource "aws_lambda_event_source_mapping" "sqs_trigger" {
 
 
 # ============================================================
-# CLOUDWATCH LOG GROUP
+# CLOUDWATCH LOG GROUP & METRICS
 # ============================================================
 
 resource "aws_cloudwatch_log_group" "log_lambda" {
-  name = "/aws/lambda/procesador_adjuntos_tickets"
-
-  retention_in_days = 7
+  name              = "/aws/lambda/procesador_adjuntos_tickets_${var.environment}"
+  retention_in_days = var.use_localstack ? 7 : 30
 
   depends_on = [
     aws_lambda_function.procesador_adjuntos
   ]
 }
 
-
-# ============================================================
-# CLOUDWATCH LOG METRIC FILTER
-# Detecta errores en los logs de Lambda.
-# ============================================================
-
 resource "aws_cloudwatch_log_metric_filter" "lambda_error_filter" {
-  name = "lambda-errores-adjuntos-filter"
-
-  pattern = "ERROR"
-
+  name           = "lambda-errores-adjuntos-filter-${var.environment}"
+  pattern        = "ERROR"
   log_group_name = aws_cloudwatch_log_group.log_lambda.name
 
   metric_transformation {
-    name = "ErroresProcesamientoAdjuntos"
-
+    name      = "ErroresProcesamientoAdjuntos"
     namespace = "TicketsApp/Lambda"
-
-    value = "1"
+    value     = "1"
   }
 
   depends_on = [
@@ -269,74 +225,18 @@ resource "aws_cloudwatch_log_metric_filter" "lambda_error_filter" {
   ]
 }
 
-
-# ============================================================
-# CLOUDWATCH METRIC ALARM
-# Se activa cuando existen 2 o más errores.
-# ============================================================
-
 resource "aws_cloudwatch_metric_alarm" "lambda_error_alarm" {
-  alarm_name = "Alarma-Errores-Lambda-Procesar-Adjuntos"
-
+  alarm_name          = "Alarma-Errores-Lambda-Procesar-Adjuntos-${var.environment}"
   comparison_operator = "GreaterThanOrEqualToThreshold"
-
-  evaluation_periods = 1
-
-  metric_name = "ErroresProcesamientoAdjuntos"
-
-  namespace = "TicketsApp/Lambda"
-
-  period = 60
-
-  statistic = "Sum"
-
-  threshold = 2
-
-  alarm_description = "Esta alarma se dispara cuando la Lambda de adjuntos registra 2 o más errores en un minuto."
-
-  # Posteriormente puedes conectar SNS aquí.
-  alarm_actions = []
+  evaluation_periods  = 1
+  metric_name         = "ErroresProcesamientoAdjuntos"
+  namespace           = "TicketsApp/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Se dispara si la Lambda registra 2 o más errores en un minuto."
 
   depends_on = [
     aws_cloudwatch_log_metric_filter.lambda_error_filter
   ]
-}
-
-
-# ============================================================
-# OUTPUTS
-# ============================================================
-
-output "s3_bucket_name" {
-  description = "Nombre del bucket S3 de adjuntos"
-
-  value = aws_s3_bucket.bucket_adjuntos.bucket
-}
-
-
-output "sqs_queue_url" {
-  description = "URL de la cola SQS"
-
-  value = aws_sqs_queue.cola_procesamiento.id
-}
-
-
-output "lambda_function_name" {
-  description = "Nombre de la función Lambda"
-
-  value = aws_lambda_function.procesador_adjuntos.function_name
-}
-
-
-output "lambda_function_arn" {
-  description = "ARN de la función Lambda"
-
-  value = aws_lambda_function.procesador_adjuntos.arn
-}
-
-
-output "cloudwatch_log_group" {
-  description = "Log Group de Lambda"
-
-  value = aws_cloudwatch_log_group.log_lambda.name
 }
